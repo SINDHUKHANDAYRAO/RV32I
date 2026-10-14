@@ -1,0 +1,14 @@
+# P4 - byte-wise memcpy of 13 bytes from 0x00 to 0x100 (word 64)
+R 10 0000000d
+R 11 0000006f
+R 12 000000de
+R 13 ffffffde
+M  0 deadb06f
+M  1 c0ffe011
+M  2 12345678
+M  3 abcde07f
+M 64 deadb06f
+M 65 c0ffe011
+M 66 12345678
+M 67 0000007f
+M 68 00000000

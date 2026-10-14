@@ -1,0 +1,3 @@
+sta scripts/run_sta_single.tcl
+exit
+exit
