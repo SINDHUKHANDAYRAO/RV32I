@@ -53,6 +53,7 @@ body{font-family:'Inter',sans-serif;background-color:#0f111a;color:#f8fafc;margi
    
   </div>
   <div class="ml-auto flex gap-4 text-xs">
+   <div class="text-right"><div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Mode</div><div id="modeBadge" class="code-font text-fuchsia-400 font-bold text-sm">Single-Cycle</div></div>
    <div class="text-right"><div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">CPI</div><div id="statCPI" class="code-font text-sky-400 font-bold text-sm">–</div></div>
    <div class="text-right"><div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Stalls</div><div id="statStalls" class="code-font text-red-400 font-bold text-sm">0</div></div>
    <div class="text-right"><div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Flush bubbles</div><div id="statFlush" class="code-font text-orange-400 font-bold text-sm">0</div></div>
@@ -60,6 +61,7 @@ body{font-family:'Inter',sans-serif;background-color:#0f111a;color:#f8fafc;margi
    <div class="text-right"><div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Program Counter</div><div id="statPC" class="code-font text-amber-400 font-bold text-sm">0x00000000</div></div>
   </div>
  </div>
+ <div id="cmpStrip" class="shrink-0 px-4 py-2 bg-panel border-b border-bordercolor text-[11px] code-font flex flex-wrap gap-x-6 gap-y-1 items-center"></div>
  <div class="flex-grow overflow-auto relative p-6 bg-[#0B0F19]" id="schematicContainer">
   <div id="viewSingle" class="relative min-w-[1000px] h-[500px] mx-auto block">
    <svg class="absolute inset-0 w-full h-full pointer-events-none" xmlns="http://www.w3.org/2000/svg">
@@ -260,7 +262,7 @@ function setArchitecture(a){
  const prev=currentArch;currentArch=a;
  const on="px-4 py-1.5 rounded-md text-xs font-bold transition-all bg-amber-500 text-black shadow",off="px-4 py-1.5 rounded-md text-xs font-medium transition-all text-slate-400 hover:text-white";
  ['single','pipe','riscv'].forEach(k=>document.getElementById('btnArch'+k[0].toUpperCase()+k.slice(1)).className=a===k?on:off);
- const rv=a==='riscv';
+ const rv=a==='riscv';if(!rv)document.getElementById('modeBadge').textContent=a==='pipe'?'5-Stage Pipeline':'Single-Cycle';
  document.getElementById('viewSingle').style.display=a==='single'?'block':'none';
  document.getElementById('viewPipe').style.display=a==='pipe'?'block':'none';document.getElementById('ganttWrap').style.display=a==='pipe'?'block':'none';
  document.getElementById('panelLeft').style.display=rv?'none':'flex';
@@ -283,7 +285,7 @@ function buildTraceLog(active){
  log.innerHTML=h||'<div class="text-slate-500">No instructions decoded.</div>';const el=log.querySelector('[data-a="1"]');if(el)el.scrollIntoView({behavior:'smooth',block:'center'});}
 function clearAnimations(){document.querySelectorAll('.node-active').forEach(e=>e.classList.remove('node-active'));document.querySelectorAll('.wire-active').forEach(e=>e.classList.remove('wire-active'));}
 function lit(ids){ids.forEach(i=>{const e=document.getElementById(i);if(e)e.classList.add(/^(pw|pf|w-)/.test(i)?'wire-active':'node-active');});}
-function isDone(){return currentArch==='pipe'?(pcyc>0&&pf>=currentProg.steps.length&&pst.every(x=>x===null||x==='b')):stepIdx>=currentProg.steps.length;}
+function isDone(){return currentArch==='pipe'?(pcyc>0&&pret>=currentProg.steps.length):stepIdx>=currentProg.steps.length;}
 function srcsOf(s){const a=(s.asm.match(/x(\d+)/g)||[]).map(x=>+x.slice(1)),op=s.asm.split(/\s+/)[0];return (/^(s[bhw]$|b)/.test(op)?a:a.slice(1)).filter(r=>r>0);}
 function stepSim(){
  if(isDone()){if(isRunning)toggleRun();return;}
@@ -336,7 +338,7 @@ function resetSim(){
  document.getElementById('sc-pc-val').textContent="0x0";document.getElementById('p-pc-val').textContent="0x0";document.getElementById('sc-imem-val').textContent="NOP";
  for(let i=0;i<5;i++){const l=document.getElementById('ps-'+i);if(l){l.textContent='—';l.style.color=PSTAGE_C[i];}}
  for(let i=0;i<32;i++)updateRegisters(i,0);
- clearAnimations();buildTraceLog();}
+ clearAnimations();buildTraceLog();updateCompare();}
 
 const OPS={add:[0,0],sub:[0x20,0],sll:[0,1],slt:[0,2],sltu:[0,3],xor:[0,4],srl:[0,5],sra:[0x20,5],or:[0,6],and:[0,7]};
 const OPI={addi:0,slti:2,sltiu:3,xori:4,ori:6,andi:7},SHI={slli:[0,1],srli:[0,5],srai:[0x20,5]},LD={lb:0,lh:1,lw:2,lbu:4,lhu:5},ST={sb:0,sh:1,sw:2},BR={beq:0,bne:1,blt:4,bge:5,bltu:6,bgeu:7};
@@ -391,6 +393,14 @@ function assembleRun(quiet){
   resetSim();if(!quiet)setTab('trace');
  }catch(e){msg.className='text-xs code-font text-red-400';msg.textContent='✖ '+e.message;setTab('code');}}
 
+const T_SC=850,T_PIPE=220;
+function simPipe(){const S=currentProg.steps,N=S.length;let o=[null,null,null,null,null],f=0,b=0,c={},r=0,y=0,g=0;
+ while(r<N&&g++<20000){const sl=!!c.stall,n=[null,null,null,null,null];n[4]=o[3];n[3]=o[2];n[2]=sl?'b':o[1];n[1]=sl?o[1]:o[0];
+  if(sl)n[0]=o[0];else if(b>0){n[0]='b';b--;}else if(f<N){n[0]=f;if(S[f].ctl)b=2;f++;}
+  o=n;y++;if(typeof n[4]==='number')r++;c=phz(n);}return y;}
+function updateCompare(){const N=currentProg.steps.length,el=document.getElementById('cmpStrip');if(!el)return;if(!N){el.innerHTML='';return;}
+ const cp=simPipe(),ts=N*T_SC/1000,tp=cp*T_PIPE/1000;
+ el.innerHTML=`<span class="text-amber-400 font-bold">Single-Cycle</span><span class="text-slate-300">${N} cycles × ${T_SC} ps = <b>${ts.toFixed(2)} ns</b></span><span class="text-sky-400 font-bold">5-Stage Pipeline</span><span class="text-slate-300">${cp} cycles × ${T_PIPE} ps = <b>${tp.toFixed(2)} ns</b></span><span class="${tp<ts?'text-emerald-400':'text-red-400'} font-bold">${tp<ts?(ts/tp).toFixed(2)+'× faster with pipeline':(tp/ts).toFixed(2)+'× slower with pipeline'}</span><span class="text-slate-500 text-[10px]">assumed stage delays IF 200 · ID 150 · EX 200 · MEM 200 · WB 100 ps; pipeline reg +20 ps</span>`;}
 function runRV(words){
  const R=new Int32Array(32),M=new Uint8Array(65536),steps=[],sx=(v,b)=>(v<<(32-b))>>(32-b);let pc=0;
  for(let n=0;n<2000;n++){
