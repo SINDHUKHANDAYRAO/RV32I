@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RV32I Datapath Simulator · Sindhu Khandayrao</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>tailwind.config={darkMode:'class',theme:{extend:{colors:{darkbg:'#0f111a',panel:'#151924',cardbg:'#1a1f2e',bordercolor:'#2a3142',accent:'#3b82f6',accentglow:'#60a5fa',signalactive:'#f59e0b'}}}}</script>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px);height:100%}
+body{font-family:'Inter',sans-serif;background-color:#0f111a;color:#f8fafc;margin:0;height:100%;display:flex;flex-direction:column;overflow:hidden}
+.code-font{font-family:'Fira Code',monospace}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#0f111a}::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+@keyframes flowPacket{0%{stroke-dashoffset:20}100%{stroke-dashoffset:0}}
+.wire-base{fill:none;stroke:#334155;stroke-width:2;transition:stroke .3s}
+.wire-active{stroke:#f59e0b;stroke-width:2.5;stroke-dasharray:8 6;animation:flowPacket .6s linear infinite;filter:drop-shadow(0 0 4px rgba(245,158,11,.6))}
+.fwd-wire{stroke:#3b82f6;stroke-dasharray:3}.fwd-wire.wire-active{stroke:#f59e0b;stroke-dasharray:8 6}
+@keyframes pulseGlow{0%{box-shadow:0 0 0 0 rgba(245,158,11,.4);border-color:#334155}50%{box-shadow:0 0 15px 2px rgba(245,158,11,.6);border-color:#f59e0b;background-color:rgba(245,158,11,.05)}100%{box-shadow:0 0 0 0 rgba(245,158,11,0);border-color:#334155}}
+.node-active{animation:pulseGlow 1s ease-in-out infinite}
+.mux-shape{clip-path:polygon(0% 0%,100% 20%,100% 80%,0% 100%)}
+.alu-shape{clip-path:polygon(0% 0%,100% 30%,100% 70%,0% 100%,0% 60%,20% 50%,0% 40%)}
+.rv h2{font-weight:700;font-size:15px;margin-bottom:8px;color:#fbbf24}.rv p,.rv li{font-size:13px;line-height:1.65;color:#94a3b8}.rv b{color:#e2e8f0}
+.rv table{width:100%;border-collapse:collapse;font-size:12px}.rv td,.rv th{border-bottom:1px solid #2a3142;padding:8px;text-align:left;vertical-align:top;color:#cbd5e1}.rv th{color:#fbbf24;font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+</style>
+</head>
+<body>
+<header class="bg-panel border-b border-bordercolor px-6 py-3 flex items-center justify-between shrink-0 z-10 shadow-md">
+ <div class="flex items-center gap-3">
+  <div class="bg-amber-500/10 text-amber-500 p-2 rounded-lg border border-amber-500/20 shadow-[0_0_10px_rgba(245,158,11,0.2)]">⚙</div>
+  <div><h1 class="font-bold text-lg tracking-wide text-slate-100 leading-tight">RV32I Core Visualizer</h1>
+  <p class="text-[10px] text-slate-400 font-mono uppercase tracking-widest">Interactive Datapath Simulator · by Sindhu Khandayrao</p></div>
+ </div>
+ <div class="flex bg-cardbg rounded-lg border border-bordercolor p-1">
+  <button id="btnArchSingle" onclick="setArchitecture('single')" class="px-4 py-1.5 rounded-md text-xs font-bold transition-all bg-amber-500 text-black shadow">Single-Cycle</button>
+  <button id="btnArchPipe" onclick="setArchitecture('pipe')" class="px-4 py-1.5 rounded-md text-xs font-medium transition-all text-slate-400 hover:text-white">5-Stage Pipeline</button>
+  <button id="btnArchRiscv" onclick="setArchitecture('riscv')" class="px-4 py-1.5 rounded-md text-xs font-medium transition-all text-slate-400 hover:text-white">What is RISC-V?</button>
+ </div>
+</header>
+<main class="flex-grow flex overflow-hidden">
+<div id="panelLeft" class="w-2/3 flex flex-col border-r border-bordercolor bg-darkbg">
+ <div class="bg-panel p-4 flex flex-wrap gap-4 items-end border-b border-bordercolor shrink-0">
+  <div class="flex-grow max-w-xs"><label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1 font-bold">Example Programs</label>
+  <select id="programSelect" onchange="loadProgram()" class="w-full bg-darkbg border border-bordercolor text-slate-200 text-xs rounded-lg px-3 py-2 outline-none focus:border-amber-500 transition font-mono shadow-inner"><option value="gcd">Euclidean GCD (loop + branches)</option><option value="fibonacci">Fibonacci F(10) (loop)</option><option value="loaduse">Load-use hazard demo</option><option value="arraysum">Array sum (memory + loop)</option><option value="logic">Logic &amp; shifts</option><option value="custom">✏ My own program (Code Editor)</option></select></div>
+  <div class="flex gap-2">
+   <button onclick="resetSim()" class="bg-cardbg hover:bg-slate-800 text-slate-300 px-4 py-2 rounded-lg text-xs font-semibold transition border border-bordercolor shadow-sm">↻ Reset</button>
+   <button onclick="stepSim()" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-4 py-2 rounded-lg text-xs font-bold transition border border-amber-500/30 shadow-sm">⏭ Step Clock</button>
+   <button id="btnRun" onclick="toggleRun()" class="bg-amber-500 hover:bg-amber-400 text-black px-6 py-2 rounded-lg text-xs font-bold transition shadow-[0_0_12px_rgba(245,158,11,0.3)]"><span id="runIcon">▶</span> <span id="runText">Run</span></button>
+  </div>
+  <div class="flex gap-2 items-end">
+   <select id="speedSel" onchange="setSpeed()" class="bg-darkbg border border-bordercolor text-slate-300 text-xs rounded-lg px-2 py-2 outline-none"><option value="1200">Slow</option><option value="600">Normal</option><option value="200">Fast</option><option value="60">Turbo</option></select>
+   
+  </div>
+  <div class="ml-auto flex gap-4 text-xs">
+   <div class="text-right"><div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">CPI</div><div id="statCPI" class="code-font text-sky-400 font-bold text-sm">–</div></div>
+   <div class="text-right"><div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Stalls</div><div id="statStalls" class="code-font text-red-400 font-bold text-sm">0</div></div>
+   <div class="text-right"><div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Flush bubbles</div><div id="statFlush" class="code-font text-orange-400 font-bold text-sm">0</div></div>
+   <div class="text-right"><div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Clock Cycles</div><div id="statCycles" class="code-font text-emerald-400 font-bold text-sm">0</div></div>
+   <div class="text-right"><div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Program Counter</div><div id="statPC" class="code-font text-amber-400 font-bold text-sm">0x00000000</div></div>
+  </div>
+ </div>
+ <div class="flex-grow overflow-auto relative p-6 bg-[#0B0F19]" id="schematicContainer">
+  <div id="viewSingle" class="relative min-w-[1000px] h-[500px] mx-auto block">
+   <svg class="absolute inset-0 w-full h-full pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+    <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/></marker></defs>
+    <path id="w-pc-imem" d="M 120 200 L 180 200" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-pc-add" d="M 90 170 L 90 90 L 130 90" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-add-pc" d="M 180 90 L 220 90 L 220 40 L 40 40 L 40 200 L 60 200" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-imem-reg" d="M 300 200 L 360 200" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-imem-ctrl" d="M 330 200 L 330 110 L 360 110" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-imem-imm" d="M 330 200 L 330 350 L 360 350" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-ctrl-alu" d="M 460 110 L 600 110 L 600 170" stroke-dasharray="4" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-ctrl-mem" d="M 460 90 L 740 90 L 740 160" stroke-dasharray="4" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-reg-alu1" d="M 480 180 L 580 180" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-reg-alu2" d="M 480 220 L 520 220 L 520 260 L 540 260" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-imm-mux" d="M 460 350 L 520 350 L 520 280 L 540 280" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-mux-alu" d="M 570 270 L 580 270 L 580 220" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-alu-dmem" d="M 660 200 L 700 200" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-alu-wbmux" d="M 680 200 L 680 300 L 830 300 L 830 250" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-dmem-wbmux" d="M 800 200 L 830 200 L 830 230" class="wire-base" marker-end="url(#arrow)"/>
+    <path id="w-wb-reg" d="M 860 240 L 890 240 L 890 420 L 420 420 L 420 250" class="wire-base" marker-end="url(#arrow)"/>
+   </svg>
+   <div id="sc-pc" class="absolute top-[170px] left-[60px] w-[60px] h-[60px] bg-cardbg border-2 border-bordercolor rounded-lg flex flex-col items-center justify-center z-10"><span class="text-amber-500 font-bold text-sm">PC</span><span id="sc-pc-val" class="text-[8px] code-font text-slate-300 mt-1">0x0</span></div>
+   <div id="sc-add" class="absolute top-[70px] left-[130px] w-[50px] h-[40px] bg-cardbg border-2 border-bordercolor rounded-lg flex items-center justify-center z-10 alu-shape"><span class="text-slate-300 font-bold text-xs ml-1">+4</span></div>
+   <div id="sc-imem" class="absolute top-[150px] left-[180px] w-[120px] h-[100px] bg-cardbg border-2 border-bordercolor rounded-lg flex flex-col items-center justify-center z-10 shadow-lg"><span class="text-purple-400 font-bold text-sm">Instruction<br>Memory</span><span id="sc-imem-val" class="text-[9px] code-font text-slate-300 mt-2 bg-darkbg px-2 py-0.5 rounded truncate w-11/12 text-center">NOP</span></div>
+   <div id="sc-ctrl" class="absolute top-[70px] left-[360px] w-[100px] h-[50px] bg-cardbg border-2 border-bordercolor rounded-[20px] flex flex-col items-center justify-center z-10"><span class="text-blue-400 font-bold text-xs">Control Unit</span></div>
+   <div id="sc-reg" class="absolute top-[150px] left-[360px] w-[120px] h-[100px] bg-cardbg border-2 border-bordercolor rounded-lg flex flex-col items-center justify-center z-10 shadow-lg"><span class="text-emerald-400 font-bold text-sm">Register File</span><span class="text-[9px] text-slate-500 mt-1">32 x 32 bits</span></div>
+   <div id="sc-imm" class="absolute top-[330px] left-[360px] w-[100px] h-[40px] bg-cardbg border-2 border-bordercolor rounded-lg flex flex-col items-center justify-center z-10"><span class="text-cyan-400 font-bold text-xs">Immediate</span></div>
+   <div id="sc-alumux" class="absolute top-[250px] left-[540px] w-[30px] h-[60px] bg-cardbg border-2 border-bordercolor rounded-md flex items-center justify-center z-10 mux-shape"><span class="text-slate-400 font-bold text-[8px] rotate-90">MUX</span></div>
+   <div id="sc-alu" class="absolute top-[160px] left-[580px] w-[80px] h-[100px] bg-cardbg border-2 border-bordercolor rounded-lg flex flex-col items-center justify-center z-10 alu-shape shadow-lg"><span class="text-amber-500 font-bold text-xl ml-2">ALU</span></div>
+   <div id="sc-dmem" class="absolute top-[150px] left-[700px] w-[100px] h-[100px] bg-cardbg border-2 border-bordercolor rounded-lg flex flex-col items-center justify-center z-10 shadow-lg"><span class="text-rose-400 font-bold text-sm">Data<br>Memory</span></div>
+   <div id="sc-wbmux" class="absolute top-[220px] left-[830px] w-[30px] h-[60px] bg-cardbg border-2 border-bordercolor rounded-md flex items-center justify-center z-10 mux-shape"><span class="text-slate-400 font-bold text-[8px] rotate-90">MUX</span></div>
+  </div>
+
+  <!-- 5-STAGE PIPELINE: fixed 1250px grid (250px per stage) so wires line up with blocks -->
+  <div id="viewPipe" class="relative h-[520px] mx-auto hidden font-sans" style="width:1250px">
+   <div class="absolute inset-0 flex">
+    <div class="flex-1 border-r border-bordercolor/50 bg-blue-950/10 p-3"><span class="text-[11px] font-extrabold text-blue-400 uppercase tracking-widest bg-blue-900/30 px-2 py-1 rounded border border-blue-500/30">Stage 1: IF</span></div>
+    <div class="flex-1 border-r border-bordercolor/50 bg-indigo-950/10 p-3"><span class="text-[11px] font-extrabold text-indigo-400 uppercase tracking-widest bg-indigo-900/30 px-2 py-1 rounded border border-indigo-500/30">Stage 2: ID</span></div>
+    <div class="flex-1 border-r border-bordercolor/50 bg-amber-950/10 p-3"><span class="text-[11px] font-extrabold text-amber-400 uppercase tracking-widest bg-amber-900/30 px-2 py-1 rounded border border-amber-500/30">Stage 3: EX</span></div>
+    <div class="flex-1 border-r border-bordercolor/50 bg-rose-950/10 p-3"><span class="text-[11px] font-extrabold text-rose-400 uppercase tracking-widest bg-rose-900/30 px-2 py-1 rounded border border-rose-500/30">Stage 4: MEM</span></div>
+    <div class="flex-1 bg-emerald-950/10 p-3"><span class="text-[11px] font-extrabold text-emerald-400 uppercase tracking-widest bg-emerald-900/30 px-2 py-1 rounded border border-emerald-500/30">Stage 5: WB</span></div>
+   </div>
+   <div class="absolute top-[50px] left-[245px] w-[10px] h-[440px] bg-gradient-to-b from-slate-700 via-amber-500/40 to-slate-700 rounded shadow-[0_0_12px_rgba(245,158,11,0.3)] z-10 flex items-center justify-center"><span class="text-[9px] font-bold text-amber-300 rotate-90 tracking-widest">IF/ID</span></div>
+   <div class="absolute top-[50px] left-[495px] w-[10px] h-[440px] bg-gradient-to-b from-slate-700 via-amber-500/40 to-slate-700 rounded shadow-[0_0_12px_rgba(245,158,11,0.3)] z-10 flex items-center justify-center"><span class="text-[9px] font-bold text-amber-300 rotate-90 tracking-widest">ID/EX</span></div>
+   <div class="absolute top-[50px] left-[745px] w-[10px] h-[440px] bg-gradient-to-b from-slate-700 via-amber-500/40 to-slate-700 rounded shadow-[0_0_12px_rgba(245,158,11,0.3)] z-10 flex items-center justify-center"><span class="text-[9px] font-bold text-amber-300 rotate-90 tracking-widest">EX/MEM</span></div>
+   <div class="absolute top-[50px] left-[995px] w-[10px] h-[440px] bg-gradient-to-b from-slate-700 via-amber-500/40 to-slate-700 rounded shadow-[0_0_12px_rgba(245,158,11,0.3)] z-10 flex items-center justify-center"><span class="text-[9px] font-bold text-amber-300 rotate-90 tracking-widest">MEM/WB</span></div>
+
+   <div id="p-pc" class="absolute top-[180px] left-[20px] w-[65px] h-[65px] bg-cardbg border-2 border-bordercolor rounded-lg flex flex-col items-center justify-center z-20 shadow-lg"><span class="text-amber-500 font-bold text-xs">PC</span><span id="p-pc-val" class="text-[8px] code-font text-slate-300 mt-1">0x0</span></div>
+   <div id="p-imem" class="absolute top-[160px] left-[120px] w-[90px] h-[105px] bg-cardbg border-2 border-bordercolor rounded-lg flex flex-col items-center justify-center z-20 shadow-lg"><span class="text-purple-400 font-bold text-xs text-center">Instruction<br>Memory</span></div>
+   <div id="p-reg" class="absolute top-[160px] left-[285px] w-[95px] h-[105px] bg-cardbg border-2 border-bordercolor rounded-lg flex flex-col items-center justify-center z-20 shadow-lg"><span class="text-emerald-400 font-bold text-xs text-center">Register<br>File</span><span class="text-[8px] text-slate-500 mt-1">32 x 32-bit</span></div>
+   <div id="p-ctrl" class="absolute top-[80px] left-[285px] w-[95px] h-[45px] bg-cardbg border-2 border-bordercolor rounded-lg flex items-center justify-center z-20 shadow-sm"><span class="text-blue-400 font-bold text-[10px]">Control Unit</span></div>
+   <div id="p-hdu" class="absolute top-[330px] left-[260px] w-[100px] h-[45px] bg-red-950/40 border-2 border-red-500/50 rounded-lg flex flex-col items-center justify-center z-20"><span class="text-red-400 font-bold text-[9px] uppercase">Hazard Unit</span><span class="text-[7px] text-slate-400">Stall / Flush logic</span></div>
+   <div id="p-alu" class="absolute top-[160px] left-[545px] w-[90px] h-[105px] bg-cardbg border-2 border-bordercolor rounded-lg flex flex-col items-center justify-center z-20 alu-shape shadow-lg"><span class="text-amber-500 font-bold text-lg ml-2">ALU</span></div>
+   <div id="p-fwd" class="absolute top-[330px] left-[560px] w-[115px] h-[45px] bg-blue-950/40 border-2 border-blue-500/50 rounded-lg flex flex-col items-center justify-center z-20"><span class="text-blue-400 font-bold text-[9px] uppercase">Forwarding Unit</span><span class="text-[7px] text-slate-400">EX &amp; MEM Bypassing</span></div>
+   <div id="p-dmem" class="absolute top-[160px] left-[795px] w-[95px] h-[105px] bg-cardbg border-2 border-bordercolor rounded-lg flex flex-col items-center justify-center z-20 shadow-lg"><span class="text-rose-400 font-bold text-xs text-center">Data<br>Memory</span><span class="text-[8px] text-slate-500 mt-1">Read / Write</span></div>
+   <div id="p-wb" class="absolute top-[180px] left-[1045px] w-[85px] h-[65px] bg-cardbg border-2 border-bordercolor rounded-lg flex flex-col items-center justify-center z-20 shadow-lg"><span class="text-emerald-400 font-bold text-xs">Writeback</span><span class="text-[8px] text-slate-400 mt-1">Reg Write</span></div>
+   <div id="psLabels"></div>
+
+   <svg class="absolute inset-0 w-full h-full pointer-events-none z-10" xmlns="http://www.w3.org/2000/svg">
+    <defs><marker id="arrowP" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/></marker></defs>
+    <path id="pw-1" d="M 85 212 L 120 212" class="wire-base" marker-end="url(#arrowP)"/>
+    <path id="pw-2" d="M 210 212 L 245 212" class="wire-base" marker-end="url(#arrowP)"/>
+    <path id="pw-2b" d="M 255 212 L 285 212" class="wire-base" marker-end="url(#arrowP)"/>
+    <path id="pw-ctrl" d="M 332 160 L 332 125" class="wire-base" marker-end="url(#arrowP)"/>
+    <path id="pw-3" d="M 380 212 L 495 212" class="wire-base" marker-end="url(#arrowP)"/>
+    <path id="pw-3b" d="M 505 212 L 545 212" class="wire-base" marker-end="url(#arrowP)"/>
+    <path id="pw-4" d="M 635 212 L 745 212" class="wire-base" marker-end="url(#arrowP)"/>
+    <path id="pw-4b" d="M 755 212 L 795 212" class="wire-base" marker-end="url(#arrowP)"/>
+    <path id="pw-5" d="M 890 212 L 995 212" class="wire-base" marker-end="url(#arrowP)"/>
+    <path id="pw-5b" d="M 1005 212 L 1045 212" class="wire-base" marker-end="url(#arrowP)"/>
+    <path id="pw-wb" d="M 1088 245 L 1088 470 L 368 470 L 368 265" class="wire-base" marker-end="url(#arrowP)"/>
+    <path id="pf-a" d="M 750 300 L 750 352 L 675 352" class="wire-base fwd-wire" marker-end="url(#arrowP)"/>
+    <path id="pf-b" d="M 1000 420 L 618 420 L 618 375" class="wire-base fwd-wire" marker-end="url(#arrowP)"/>
+    <path id="pf-c" d="M 590 330 L 590 265" class="wire-base fwd-wire" marker-end="url(#arrowP)"/>
+    <text x="1088" y="462" fill="#64748b" font-size="9" text-anchor="end" transform="translate(-12,0)">write-back to register file</text>
+   </svg>
+  </div>
+  <div id="ganttWrap" class="mt-4 mx-auto" style="width:1250px;display:none"></div>
+ </div>
+</div>
+
+<div id="panelRight" class="w-1/3 flex flex-col bg-panel z-20 shadow-[-10px_0_20px_rgba(0,0,0,0.3)] border-l border-bordercolor">
+ <div class="flex border-b border-bordercolor text-xs font-bold tracking-wide">
+  <button id="tabTrace" onclick="setTab('trace')" class="flex-1 py-3 text-amber-500 border-b-2 border-amber-500 transition-colors bg-cardbg">Numeric Trace</button>
+  <button id="tabReg" onclick="setTab('reg')" class="flex-1 py-3 text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition-colors">Register File</button>
+  <button id="tabCode" onclick="setTab('code')" class="flex-1 py-3 text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition-colors">Code Editor</button>
+ </div>
+ <div id="contentTrace" class="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+  <div class="text-[10px] text-slate-400 uppercase tracking-widest font-bold mb-2">Algorithm Execution Steps</div>
+  <div id="traceLog" class="flex flex-col gap-2 font-mono text-xs"></div>
+ </div>
+ <div id="contentReg" class="flex-1 overflow-y-auto hidden">
+  <table class="w-full text-left text-xs font-mono border-collapse">
+   <thead class="sticky top-0 bg-panel border-b border-bordercolor shadow-md z-10"><tr class="text-slate-400"><th class="py-2 px-4 font-normal">Reg</th><th class="py-2 px-4 font-normal">ABI</th><th class="py-2 px-4 font-normal text-right">Hex Value</th></tr></thead>
+   <tbody id="regTableBody" class="divide-y divide-bordercolor/50"></tbody>
+  </table>
+ </div>
+<div id="contentCode" class="flex-1 overflow-y-auto p-4 hidden flex-col gap-3">
+  <div class="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Type any RV32I assembly, then press Assemble</div>
+  <textarea id="codeBox" oninput="document.getElementById('programSelect').value='custom'" spellcheck="false" class="w-full min-h-[280px] flex-1 bg-darkbg border border-bordercolor rounded-lg p-3 code-font text-xs text-slate-200 outline-none focus:border-amber-500"></textarea>
+  <div class="flex gap-2"><button onclick="assembleRun()" class="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg text-xs font-bold">Assemble &amp; Load</button><button onclick="document.getElementById('codeHelp').classList.toggle('hidden')" class="bg-cardbg text-slate-300 px-4 py-2 rounded-lg text-xs font-semibold border border-bordercolor">Syntax help</button></div>
+  <div id="codeMsg" class="text-xs code-font"></div>
+  <div id="codeHelp" class="hidden text-[11px] text-slate-400 leading-relaxed"><b class="text-slate-200">Registers:</b> x0–x31 or ABI names (a0, t1, sp…). <b class="text-slate-200">Comments:</b> # // ;<br><b class="text-slate-200">Labels:</b> <span class="code-font">loop:</span><br><b class="text-slate-200">R:</b> add sub sll slt sltu xor srl sra or and<br><b class="text-slate-200">I:</b> addi slti sltiu xori ori andi slli srli srai<br><b class="text-slate-200">Memory:</b> lb lh lw lbu lhu sb sh sw (e.g. <span class="code-font">lw x5, 4(x6)</span>)<br><b class="text-slate-200">Branch/Jump:</b> beq bne blt bge bltu bgeu jal jalr<br><b class="text-slate-200">Other:</b> lui auipc ebreak ecall<br><b class="text-slate-200">Pseudo:</b> nop li mv j jr ret beqz bnez bgt ble not neg<br>Ends at <span class="code-font">ebreak</span> or after 2000 instructions. Data memory is 64KB starting at address 0.</div>
+ </div>
+</div>
+
+<!-- WHAT IS RISC-V window -->
+<section id="viewRiscv" class="rv hidden flex-grow overflow-y-auto p-8 bg-[#0B0F19]">
+ <div class="max-w-5xl mx-auto grid gap-6">
+  <div><h1 class="text-2xl font-bold text-slate-100">What is RISC-V?</h1>
+  <p class="mt-2"><b>RISC-V</b> (“risk-five”) is a free, open instruction set architecture from UC Berkeley: anyone can build a chip with it, no license fees. <b>RISC</b> means a small set of simple, fixed-format instructions that are easy to make fast. <b>RV32I</b> is the base 32-bit integer version: 32 registers (<b>x0</b> is always 0), 32-bit instructions, load/store memory access, ~40 base instructions.</p></div>
+  <div><h2>Instruction formats</h2><p><b>R</b> add/sub/and/or · <b>I</b> addi/lw/jalr · <b>S</b> sw/sb/sh · <b>B</b> beq/bne/blt · <b>U</b> lui/auipc · <b>J</b> jal. The Immediate Generator sign-extends the immediate for I, S, B, U and J types.</p></div>
+  <div><h2>Single-Cycle vs 5-Stage Pipeline: the difference</h2>
+  <table><tr><th></th><th>Single-Cycle</th><th>5-Stage Pipeline</th></tr>
+  <tr><td><b>Execution</b></td><td>Whole instruction (fetch→writeback) in one clock</td><td>Split into IF, ID, EX, MEM, WB; 5 instructions overlap</td></tr>
+  <tr><td><b>Clock period</b></td><td>Long: IMEM→RegFile→ALU→DMEM→WB critical path</td><td>Short: only the slowest stage + register setup (~3× faster clock)</td></tr>
+  <tr><td><b>CPI</b></td><td>1</td><td>Ideal ≈1; higher with stalls/flushes</td></tr>
+  <tr><td><b>Hardware use</b></td><td>Units sit idle most of each cycle</td><td>All stages busy every cycle</td></tr>
+  <tr><td><b>Extra hardware</b></td><td>None</td><td>IF/ID, ID/EX, EX/MEM, MEM/WB registers, Forwarding Unit, Hazard Unit</td></tr>
+  <tr><td><b>Hazards</b></td><td>None</td><td>Data (forward from EX/MEM or MEM/WB), load-use (stall 1 cycle), control (flush on branch/jump)</td></tr>
+  <tr><td><b>Complexity</b></td><td>Simple</td><td>Complex</td></tr></table></div>
+  <div><h2>This project’s RTL</h2><p><b>Fetch/Control:</b> pc_reg, next_pc, adder, imem, control_unit, alu_decoder · <b>Execute:</b> regfile, imm_gen, alu, branch_unit, mux2, mux4 · <b>Memory:</b> lsu, dmem. Two cores: <b>rtl/</b> (single-cycle) and <b>rtl_pipe/</b> (5-stage).</p></div>
+  <div><h2>Verified programs (sw/ vs .expect)</h2><p class="code-font text-emerald-400">✔ arith ✔ chk ✔ p1_arraysum ✔ p2_gcd ✔ p3_fib ✔ p4_memcpy ✔ p5_coverage ✔ p6_gapfill: all PASSED</p></div>
+  <p class="text-center text-xs">Designed by <b>Sindhu Khandayrao</b></p>
+ </div>
+</section>
+</main>
+
+<script>
+const abi=["zero","ra","sp","gp","tp","t0","t1","t2","s0","s1","a0","a1","a2","a3","a4","a5","a6","a7","s2","s3","s4","s5","s6","s7","s8","s9","s10","s11","t3","t4","t5","t6"];
+let currentArch='single',currentTab='trace',isRunning=false,runInterval=null,pc=0,cycles=0,stepIdx=0,pcyc=0,registers=new Array(32).fill(0);
+const W=["w-reg-alu1","w-reg-alu2","w-mux-alu","w-alu-wbmux","w-wb-reg"];
+const PRESETS={
+gcd:`# Euclid's GCD by repeated subtraction
+addi x1, x0, 48
+addi x2, x0, 36
+loop: beq x1, x2, done
+blt x1, x2, less
+sub x1, x1, x2
+j loop
+less: sub x2, x2, x1
+j loop
+done: addi x10, x1, 0   # result in a0
+ebreak`,
+fibonacci:`# F(10) iteratively
+addi x1, x0, 0
+addi x2, x0, 1
+addi x3, x0, 10
+loop: beqz x3, done
+add x4, x1, x2
+mv x1, x2
+mv x2, x4
+addi x3, x3, -1
+j loop
+done: mv x10, x1
+ebreak`,
+loaduse:`# lw followed by a dependent add => load-use stall
+addi x1, x0, 7
+sw x1, 0(x0)
+lw x2, 0(x0)
+add x3, x2, x1
+addi x10, x3, 0
+ebreak`,
+arraysum:`# store 10,20,30 then sum them with a loop
+addi x1, x0, 10
+sw x1, 0(x0)
+addi x1, x0, 20
+sw x1, 4(x0)
+addi x1, x0, 30
+sw x1, 8(x0)
+addi x6, x0, 0
+addi x7, x0, 12
+addi x10, x0, 0
+loop: lw x5, 0(x6)
+add x10, x10, x5
+addi x6, x6, 4
+blt x6, x7, loop
+ebreak`,
+logic:`li x1, 0xF0F0
+li x2, 0x0FF0
+and x3, x1, x2
+or  x4, x1, x2
+xor x5, x1, x2
+slli x6, x1, 4
+srli x7, x1, 4
+li x8, -16
+srai x9, x8, 2
+sltu x10, x2, x1
+ebreak`};
+const programs={};let currentProg={steps:[]};
+let pst=[null,null,null,null,null],pf=0,pbub=0,pcur={},phist=[],pret=0,pstall=0,pfl=0;
+const SN=['IF','ID','EX','MEM','WB'],WI=["w-reg-alu1","w-imm-mux","w-mux-alu","w-alu-wbmux","w-wb-reg"];
+const PSTAGE_C=['#60a5fa','#818cf8','#fbbf24','#fb7185','#34d399'];
+window.onload=()=>{
+ document.getElementById('psLabels').innerHTML=PSTAGE_C.map((c,i)=>`<div id="ps-${i}" class="absolute code-font text-[10px] font-semibold text-center z-20" style="left:${i*250+15}px;width:220px;top:44px;color:${c}">—</div>`).join('');
+ initRegTable();loadProgram();};
+function setArchitecture(a){
+ const prev=currentArch;currentArch=a;
+ const on="px-4 py-1.5 rounded-md text-xs font-bold transition-all bg-amber-500 text-black shadow",off="px-4 py-1.5 rounded-md text-xs font-medium transition-all text-slate-400 hover:text-white";
+ ['single','pipe','riscv'].forEach(k=>document.getElementById('btnArch'+k[0].toUpperCase()+k.slice(1)).className=a===k?on:off);
+ const rv=a==='riscv';
+ document.getElementById('viewSingle').style.display=a==='single'?'block':'none';
+ document.getElementById('viewPipe').style.display=a==='pipe'?'block':'none';document.getElementById('ganttWrap').style.display=a==='pipe'?'block':'none';
+ document.getElementById('panelLeft').style.display=rv?'none':'flex';
+ document.getElementById('panelRight').style.display=rv?'none':'flex';
+ document.getElementById('viewRiscv').style.display=rv?'block':'none';
+ if(rv){if(isRunning)toggleRun();}else if(prev!==a)resetSim();}
+function setTab(t){currentTab=t;
+ const on="flex-1 py-3 text-amber-500 border-b-2 border-amber-500 transition-colors bg-cardbg",off="flex-1 py-3 text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition-colors";
+ [['trace','Trace','flex'],['reg','Reg','block'],['code','Code','flex']].forEach(([k,n,d])=>{document.getElementById('tab'+n).className=t===k?on:off;document.getElementById('content'+n).style.display=t===k?d:'none';});}
+function loadProgram(){const v=document.getElementById('programSelect').value,box=document.getElementById('codeBox');if(v!=='custom')box.value=PRESETS[v];assembleRun(true);}
+function initRegTable(){const tb=document.getElementById('regTableBody');tb.innerHTML='';
+ for(let i=0;i<32;i++)tb.innerHTML+=`<tr class="hover:bg-slate-800/30 transition-colors"><td class="py-2 px-4 text-emerald-400 font-bold">x${i}</td><td class="py-2 px-4 text-slate-500">${abi[i]}</td><td class="py-2 px-4 text-right text-slate-300" id="regval-${i}">0x00000000</td></tr>`;}
+function updateRegisters(reg,val){if(reg>0){registers[reg]=val;const el=document.getElementById(`regval-${reg}`);el.textContent="0x"+(val>>>0).toString(16).padStart(8,'0');el.classList.add('text-amber-400');setTimeout(()=>el.classList.remove('text-amber-400'),800);}}
+function buildTraceLog(active){
+ active=active||(stepIdx>0?[stepIdx-1]:[]);const S=currentProg.steps,log=document.getElementById('traceLog'),big=S.length>30;
+ const last=active.length?active[active.length-1]:0,st=big?Math.max(0,Math.min(last-4,S.length-30)):0,en=big?st+30:S.length;
+ let h=big?`<div class="text-[10px] text-slate-500">showing ${st+1}–${en} of ${S.length} executed instructions</div>`:'';
+ for(let i=st;i<en;i++){const a=active.includes(i);
+  h+=`<div ${i===last&&active.length?'data-a="1"':''} class="p-3 rounded-lg border ${a?'bg-amber-500/10 border-amber-500/50 text-amber-200 shadow-md':'bg-darkbg border-bordercolor text-slate-400'} transition-all"><div class="flex justify-between items-center mb-1"><span class="font-bold">${S[i].asm}</span><span class="text-[9px] bg-slate-800 px-2 py-0.5 rounded text-slate-300">${S[i].vars||''}</span></div><div class="text-[10px] opacity-70">${S[i].desc||''}</div></div>`;}
+ log.innerHTML=h||'<div class="text-slate-500">No instructions decoded.</div>';const el=log.querySelector('[data-a="1"]');if(el)el.scrollIntoView({behavior:'smooth',block:'center'});}
+function clearAnimations(){document.querySelectorAll('.node-active').forEach(e=>e.classList.remove('node-active'));document.querySelectorAll('.wire-active').forEach(e=>e.classList.remove('wire-active'));}
+function lit(ids){ids.forEach(i=>{const e=document.getElementById(i);if(e)e.classList.add(/^(pw|pf|w-)/.test(i)?'wire-active':'node-active');});}
+function isDone(){return currentArch==='pipe'?(pcyc>0&&pf>=currentProg.steps.length&&pst.every(x=>x===null||x==='b')):stepIdx>=currentProg.steps.length;}
+function srcsOf(s){const a=(s.asm.match(/x(\d+)/g)||[]).map(x=>+x.slice(1)),op=s.asm.split(/\s+/)[0];return (/^(s[bhw]$|b)/.test(op)?a:a.slice(1)).filter(r=>r>0);}
+function stepSim(){
+ if(isDone()){if(isRunning)toggleRun();return;}
+ if(currentArch==='pipe')return stepPipe();
+ const step=currentProg.steps[stepIdx];pc=step.pc!==undefined?step.pc:stepIdx*4;cycles++;
+ document.getElementById('statPC').textContent="0x"+(pc>>>0).toString(16).padStart(8,'0');
+ document.getElementById('statCycles').textContent=cycles;document.getElementById('statCPI').textContent='1.00';
+ document.getElementById('sc-pc-val').textContent="0x"+pc.toString(16);document.getElementById('sc-imem-val').textContent=step.asm;
+ updateRegisters(step.reg,step.val);stepIdx++;buildTraceLog();clearAnimations();
+ if(step.node)lit([step.node].concat(step.w));}
+function phz(s){const S=currentProg.steps,id=s[1];if(typeof id!=='number')return{};const sr=srcsOf(S[id]),ex=s[2],me=s[3];
+ const rd=i=>typeof i==='number'&&S[i].reg>0?S[i].reg:-1;
+ if(typeof ex==='number'&&/^l[bhw]u?$/.test(S[ex].asm.split(/\s+/)[0])&&sr.includes(rd(ex)))return{stall:'load-use on x'+rd(ex)};
+ if(sr.includes(rd(ex)))return{fwd:'EX/MEM',r:rd(ex)};if(sr.includes(rd(me)))return{fwd:'MEM/WB',r:rd(me)};return{};}
+function renderGantt(){const S=currentProg.steps,h=phist.slice(-16),off=phist.length-h.length;
+ const ids=[...new Set(h.flatMap(c=>c.s.filter(x=>typeof x==='number')))].sort((a,b)=>a-b);
+ const msg=pcur.stall?'Hazard Unit: '+pcur.stall+' → 1 bubble inserted':pcur.fwd?'Forwarding Unit: '+pcur.fwd+' → ALU (x'+pcur.r+')':'no hazard this cycle';
+ let t=`<div class="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-2">Pipeline timing diagram · <span class="${pcur.stall?'text-red-400':pcur.fwd?'text-sky-400':'text-slate-500'}">${msg}</span></div><table class="code-font text-[10px]" style="border-spacing:2px;border-collapse:separate"><tr><td></td>`+h.map((_,i)=>`<td class="text-slate-500 text-center">${off+i+1}</td>`).join('')+'</tr>';
+ ids.forEach(i=>{t+=`<tr><td class="pr-2 text-slate-300 whitespace-nowrap">${S[i].asm.replace(/\s+/g,' ')}</td>`;h.forEach(c=>{const k=c.s.indexOf(i);t+=k<0?'<td></td>':(c.stall&&k<2?`<td class="text-center rounded px-1.5 py-0.5 bg-red-500/30 text-red-300">${SN[k]}</td>`:`<td class="text-center rounded px-1.5 py-0.5 font-bold text-black" style="background:${PSTAGE_C[k]}">${SN[k]}</td>`)});t+='</tr>'});
+ document.getElementById('ganttWrap').innerHTML=h.length?t+'</table>':'';}
+function stepPipe(){
+ const S=currentProg.steps,N=S.length,o=pst,sl=!!pcur.stall,n=[null,null,null,null,null];
+ n[4]=o[3];n[3]=o[2];n[2]=sl?'b':o[1];n[1]=sl?o[1]:o[0];
+ if(sl)n[0]=o[0];else if(pbub>0){n[0]='b';pbub--;pfl++;}else if(pf<N){n[0]=pf;if(S[pf].ctl)pbub=2;pf++;}
+ pst=n;pcyc++;cycles=pcyc;
+ if(typeof n[4]==='number'){pret++;updateRegisters(S[n[4]].reg,S[n[4]].val);}
+ pcur=phz(n);if(pcur.stall)pstall++;phist.push({s:[...n],stall:!!pcur.stall});
+ clearAnimations();
+ const comps=[['p-pc','p-imem'],['p-reg','p-ctrl'],['p-alu'],['p-dmem'],['p-wb']],wires=[['pw-1','pw-2'],['pw-2b','pw-3','pw-ctrl'],['pw-3b','pw-4'],['pw-4b','pw-5'],['pw-5b','pw-wb']],fl=[];
+ for(let k=0;k<5;k++){const v=n[k],lb=document.getElementById('ps-'+k);
+  if(typeof v==='number'){fl.push(v);lit(comps[k].concat(wires[k]));lb.textContent=S[v].asm.replace(/\s+/g,' ');lb.style.color=PSTAGE_C[k];}
+  else{lb.textContent=v==='b'?'— bubble —':'—';lb.style.color=v==='b'?'#ef4444':'#64748b';}}
+ if(pcur.stall){lit(['p-hdu']);const l=document.getElementById('ps-1');l.textContent='⛔ STALL · '+l.textContent;l.style.color='#ef4444';}
+ if(pcur.fwd)lit(['p-fwd',pcur.fwd==='EX/MEM'?'pf-a':'pf-b','pf-c']);
+ if(typeof n[0]==='number'){pc=S[n[0]].pc!==undefined?S[n[0]].pc:n[0]*4;document.getElementById('p-pc-val').textContent="0x"+pc.toString(16);document.getElementById('statPC').textContent="0x"+(pc>>>0).toString(16).padStart(8,'0');}
+ document.getElementById('statCycles').textContent=cycles;document.getElementById('statStalls').textContent=pstall;document.getElementById('statFlush').textContent=pfl;
+ document.getElementById('statCPI').textContent=pret?(cycles/pret).toFixed(2):'–';
+ buildTraceLog(fl.sort((a,b)=>a-b));renderGantt();}
+function tick(){if(isDone())toggleRun();else stepSim();}
+function setSpeed(){if(isRunning){clearInterval(runInterval);runInterval=setInterval(tick,+document.getElementById('speedSel').value);}}
+function toggleRun(){
+ isRunning=!isRunning;const btn=document.getElementById('btnRun'),icon=document.getElementById('runIcon'),txt=document.getElementById('runText');
+ if(isRunning){txt.textContent="Pause";icon.textContent="⏸";btn.classList.replace('bg-amber-500','bg-red-500');btn.classList.replace('hover:bg-amber-400','hover:bg-red-400');runInterval=setInterval(tick,+document.getElementById('speedSel').value);}
+ else{txt.textContent="Run";icon.textContent="▶";btn.classList.replace('bg-red-500','bg-amber-500');btn.classList.replace('hover:bg-red-400','hover:bg-amber-400');clearInterval(runInterval);}}
+function resetSim(){
+ if(isRunning)toggleRun();pc=0;cycles=0;stepIdx=0;pcyc=0;registers.fill(0);
+ pst=[null,null,null,null,null];pf=0;pbub=0;pcur={};phist=[];pret=0;pstall=0;pfl=0;
+ ['statCycles','statStalls','statFlush'].forEach(i=>document.getElementById(i).textContent='0');document.getElementById('statCPI').textContent='–';
+ document.getElementById('statPC').textContent="0x00000000";document.getElementById('ganttWrap').innerHTML='';
+ document.getElementById('sc-pc-val').textContent="0x0";document.getElementById('p-pc-val').textContent="0x0";document.getElementById('sc-imem-val').textContent="NOP";
+ for(let i=0;i<5;i++){const l=document.getElementById('ps-'+i);if(l){l.textContent='—';l.style.color=PSTAGE_C[i];}}
+ for(let i=0;i<32;i++)updateRegisters(i,0);
+ clearAnimations();buildTraceLog();}
+
+const OPS={add:[0,0],sub:[0x20,0],sll:[0,1],slt:[0,2],sltu:[0,3],xor:[0,4],srl:[0,5],sra:[0x20,5],or:[0,6],and:[0,7]};
+const OPI={addi:0,slti:2,sltiu:3,xori:4,ori:6,andi:7},SHI={slli:[0,1],srli:[0,5],srai:[0x20,5]},LD={lb:0,lh:1,lw:2,lbu:4,lhu:5},ST={sb:0,sh:1,sw:2},BR={beq:0,bne:1,blt:4,bge:5,bltu:6,bgeu:7};
+const H=(o,k)=>Object.prototype.hasOwnProperty.call(o,k);
+function assemble(src){
+ const items=[],labels={};let pc=0;
+ const num=(s,n)=>{if(s===undefined||!/^-?(0x[0-9a-f]+|\d+)$/i.test(s))throw new Error('Line '+n+": bad number '"+s+"'");return s[0]=='-'?-Number(s.slice(1)):Number(s);};
+ src.split('\n').forEach((raw,i)=>{let t=raw.replace(/(#|\/\/|;).*/,'').trim(),m;
+  while((m=t.match(/^([A-Za-z_.][\w.]*):\s*/))){labels[m[1]]=pc;t=t.slice(m[0].length);}
+  if(!t)return;const tk=t.split(/[\s,]+/).filter(Boolean),op=tk[0].toLowerCase(),a=tk.slice(1);
+  let size=1;if(op==='li'){const v=num(a[1],i+1);size=(v>=-2048&&v<=2047)?1:2;}
+  items.push({op,a,pc,n:i+1});pc+=4*size;});
+ const out=[];
+ for(const it of items){const {op,a,pc,n}=it,E=m=>{throw new Error('Line '+n+': '+m);};
+  const R_=s=>{s=(s||'').toLowerCase();const m=s.match(/^x(\d+)$/);if(m&&+m[1]<32)return+m[1];if(s==='fp')return 8;const i=abi.indexOf(s);if(i<0)E("unknown register '"+s+"'");return i;};
+  const N_=s=>num(s,n),T_=s=>H(labels,s)?labels[s]-pc:N_(s);
+  const i12=v=>{if(v<-2048||v>2047)E('immediate '+v+' out of range (-2048..2047)');return v&0xfff;};
+  const I_=(o,f,rd,rs,im)=>(i12(im)<<20|rs<<15|f<<12|rd<<7|o)|0;
+  const M_=s=>{const m=(s||'').match(/^(-?\w*)\((\w+)\)$/);if(!m)E("expected imm(reg), got '"+s+"'");return[m[1]?N_(m[1]):0,R_(m[2])];};
+  const B_=(f,r1,r2,off)=>{if(off%2||off<-4096||off>4094)E('branch target out of range');return(((off>>12)&1)<<31|((off>>5)&63)<<25|r2<<20|r1<<15|f<<12|((off>>1)&15)<<8|((off>>11)&1)<<7|0x63)|0;};
+  const J_=(rd,off)=>(((off>>20)&1)<<31|((off>>1)&1023)<<21|((off>>11)&1)<<20|((off>>12)&255)<<12|rd<<7|0x6f)|0;
+  if(H(OPS,op)){const[f7,f3]=OPS[op];out.push((f7<<25|R_(a[2])<<20|R_(a[1])<<15|f3<<12|R_(a[0])<<7|0x33)|0);}
+  else if(H(OPI,op))out.push(I_(0x13,OPI[op],R_(a[0]),R_(a[1]),N_(a[2])));
+  else if(H(SHI,op)){const sh=N_(a[2]);if(sh<0||sh>31)E('shift amount must be 0..31');out.push(I_(0x13,SHI[op][1],R_(a[0]),R_(a[1]),sh|(SHI[op][0]<<5)));}
+  else if(H(LD,op)){const[im,rs]=M_(a[1]);out.push(I_(0x03,LD[op],R_(a[0]),rs,im));}
+  else if(H(ST,op)){const[im,rs]=M_(a[1]),v=i12(im);out.push(((v>>5)<<25|R_(a[0])<<20|rs<<15|ST[op]<<12|(v&31)<<7|0x23)|0);}
+  else if(H(BR,op))out.push(B_(BR[op],R_(a[0]),R_(a[1]),T_(a[2])));
+  else if(op==='beqz'||op==='bnez')out.push(B_(op==='beqz'?0:1,R_(a[0]),0,T_(a[1])));
+  else if(op==='bgt')out.push(B_(4,R_(a[1]),R_(a[0]),T_(a[2])));
+  else if(op==='ble')out.push(B_(5,R_(a[1]),R_(a[0]),T_(a[2])));
+  else if(op==='jal')out.push(a.length>1?J_(R_(a[0]),T_(a[1])):J_(1,T_(a[0])));
+  else if(op==='j')out.push(J_(0,T_(a[0])));
+  else if(op==='jalr')out.push(a.length>2?I_(0x67,0,R_(a[0]),R_(a[1]),N_(a[2])):I_(0x67,0,1,R_(a[0]),0));
+  else if(op==='jr')out.push(I_(0x67,0,0,R_(a[0]),0));
+  else if(op==='ret')out.push(I_(0x67,0,0,1,0));
+  else if(op==='lui'||op==='auipc')out.push((((N_(a[1]))&0xfffff)<<12|R_(a[0])<<7|(op==='lui'?0x37:0x17))|0);
+  else if(op==='nop')out.push(0x13);
+  else if(op==='mv')out.push(I_(0x13,0,R_(a[0]),R_(a[1]),0));
+  else if(op==='not')out.push(I_(0x13,4,R_(a[0]),R_(a[1]),-1));
+  else if(op==='neg')out.push((0x20<<25|R_(a[1])<<20|R_(a[0])<<7|0x33)|0);
+  else if(op==='li'){const v=N_(a[1]),rd=R_(a[0]);if(v>=-2048&&v<=2047)out.push(I_(0x13,0,rd,0,v));else{const hi=(v+0x800)>>12,lo=v-(hi<<12);out.push(((hi&0xfffff)<<12|rd<<7|0x37)|0);out.push(I_(0x13,0,rd,rd,lo));}}
+  else if(op==='ebreak')out.push(0x00100073);
+  else if(op==='ecall')out.push(0x73);
+  else E("unknown instruction '"+op+"'");}
+ return out;}
+function assembleRun(quiet){
+ const box=document.getElementById('codeBox'),msg=document.getElementById('codeMsg');
+ try{const words=assemble(box.value),steps=runRV(words);if(!steps.length)throw new Error('Nothing to execute: add at least one instruction');
+  currentProg={steps};const cap=steps.length>=2000;
+  msg.className='text-xs code-font text-emerald-400';msg.textContent='✔ '+words.length+' instructions assembled, '+steps.length+' executed'+(cap?' (stopped at 2000-instruction limit)':'');
+  if(!quiet){document.getElementById('programSelect').value='custom';}
+  resetSim();if(!quiet)setTab('trace');
+ }catch(e){msg.className='text-xs code-font text-red-400';msg.textContent='✖ '+e.message;setTab('code');}}
+
+function runRV(words){
+ const R=new Int32Array(32),M=new Uint8Array(65536),steps=[],sx=(v,b)=>(v<<(32-b))>>(32-b);let pc=0;
+ for(let n=0;n<2000;n++){
+  const idx=pc>>2;if(pc<0||idx>=words.length)break;
+  const w=words[idx],op=w&127,rd=(w>>7)&31,f3=(w>>12)&7,r1=(w>>15)&31,r2=(w>>20)&31,f7=w>>>25,a=R[r1],b=R[r2];
+  const iI=w>>20,iS=sx(((w>>>25)<<5)|rd,12),iB=sx(((w>>>31)<<12)|(((w>>7)&1)<<11)|(((w>>>25)&63)<<5)|(((w>>8)&15)<<1),13),iU=w&0xfffff000,iJ=sx(((w>>>31)<<20)|(((w>>12)&255)<<12)|(((w>>20)&1)<<11)|(((w>>21)&1023)<<1),21);
+  let asm='.word 0x'+(w>>>0).toString(16),val=0,wr=-1,np=pc+4,ctl=false,node='sc-alu',wl=W,halt=false;
+  if(op==0x33){const nm=[f7?'sub':'add','sll','slt','sltu','xor',f7?'sra':'srl','or','and'][f3];
+   val=[f7?a-b:a+b,a<<(b&31),(a<b)|0,((a>>>0)<(b>>>0))|0,a^b,f7?a>>(b&31):a>>>(b&31),a|b,a&b][f3];asm=`${nm} x${rd}, x${r1}, x${r2}`;wr=rd;}
+  else if(op==0x13){const nm=['addi','slli','slti','sltiu','xori',f7?'srai':'srli','ori','andi'][f3],sh=r2;
+   val=[a+iI,a<<sh,(a<iI)|0,((a>>>0)<(iI>>>0))|0,a^iI,f7?a>>sh:a>>>sh,a|iI,a&iI][f3];asm=`${nm} x${rd}, x${r1}, ${(f3==1||f3==5)?sh:iI}`;wr=rd;wl=WI;}
+  else if(op==3){const ad=(a+iI)&0xffff,m=M[ad]|(M[ad+1]<<8)|(M[ad+2]<<16)|(M[ad+3]<<24);
+   val=[sx(M[ad],8),sx(m&0xffff,16),m,0,M[ad],m&0xffff][f3]||0;asm=`${['lb','lh','lw','','lbu','lhu'][f3]} x${rd}, ${iI}(x${r1})`;wr=rd;node='sc-dmem';wl=["w-reg-alu1","w-alu-dmem","w-dmem-wbmux","w-wb-reg"];}
+  else if(op==0x23){const ad=(a+iS)&0xffff,nb=[1,2,4][f3]||4;for(let k=0;k<nb;k++)M[ad+k]=(b>>(8*k))&255;asm=`${['sb','sh','sw'][f3]||'sw'} x${r2}, ${iS}(x${r1})`;node='sc-dmem';wl=["w-reg-alu1","w-alu-dmem"];}
+  else if(op==0x63){const c=[a==b,a!=b,0,0,a<b,a>=b,(a>>>0)<(b>>>0),(a>>>0)>=(b>>>0)][f3];asm=`${['beq','bne','','','blt','bge','bltu','bgeu'][f3]} x${r1}, x${r2}, ${iB}`;wl=["w-reg-alu1","w-reg-alu2"];if(c){np=pc+iB;ctl=true;}}
+  else if(op==0x6f){val=pc+4;wr=rd;np=pc+iJ;ctl=true;asm=`jal x${rd}, ${iJ}`;node='sc-add';wl=["w-pc-add","w-add-pc"];}
+  else if(op==0x67){val=pc+4;wr=rd;np=(a+iI)&~1;ctl=true;asm=`jalr x${rd}, x${r1}, ${iI}`;node='sc-add';wl=["w-pc-add","w-add-pc"];}
+  else if(op==0x37||op==0x17){val=op==0x37?iU:pc+iU;wr=rd;asm=`${op==0x37?'lui':'auipc'} x${rd}, 0x${(iU>>>12).toString(16)}`;node='sc-imm';wl=[];}
+  else if(op==0x73){asm=iI?'ebreak':'ecall';node='sc-ctrl';wl=[];halt=true;}
+  if(wr>0)R[wr]=val;
+  steps.push({asm,desc:'pc = 0x'+pc.toString(16),node,w:wl,reg:wr>0?wr:-1,val:wr>0?val|0:0,vars:wr>0?`x${wr} = ${val|0}`:'',ctl,pc});
+  if(halt)break;pc=np;}
+ return steps;}
+
+</script>
+</body>
+</html>
